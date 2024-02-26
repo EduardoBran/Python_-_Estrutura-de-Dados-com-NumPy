@@ -285,8 +285,50 @@ colSums(is.na(dados_limpos))
 
 
 
-#### Tratando Colunas do tipo Numérica
+#### Tratando Colunas do tipo Numérica     ("sapply(dados_limpos, is.numeric)" -> colunas numéricas)
+
+
+## Este trecho do código seria somente para ficar igual ao projeto original do Python (não necessário em Python)
+
+# Definindo um valor coringa
+# valor_coringa <- max(sapply(dados_limpos[, sapply(dados_limpos, is.numeric)], max, na.rm = TRUE)) + 1
+
+## Antes de iniciar o tratamento das colunas vamos substituir qualquer valor NA ou ausente (chr "") por um valor arbitrário chamado valor_coringa
+# dados_limpos[, sapply(dados_limpos, is.numeric)] <- lapply(dados_limpos[, sapply(dados_limpos, is.numeric)], function(coluna) {
+#   # Substitui NA por valor_coringa na coluna
+#   coluna[is.na(coluna)] <- valor_coringa
+#   return(coluna)
+# })
+
+
+## Criando um dataframe de estatísticas (se usasse o valor_coringa como em python precisaria ajustar a funcao estatisticas)
+
+# Calculando estatísticas
+estatisticas <- sapply(dados_limpos[, sapply(dados_limpos, is.numeric)], function(coluna) {
+  c(min = min(coluna, na.rm = TRUE), 
+    mean = mean(coluna, na.rm = TRUE), 
+    max = max(coluna, na.rm = TRUE))
+})
+
+# Convertendo para dataframe
+df_estatisticas <- as.data.frame(t(estatisticas))
+df_estatisticas
+rm(estatisticas)
+summary(dados_limpos$funded_amnt)
 
 
 
+## Tratando coluna numérica funded_amtn (substituindo todos os valores NA pelo valor mínimo)
+
+# Substituindo valores NA por valor mínimo na coluna funded_amnt
+dados_limpos$funded_amnt[is.na(dados_limpos$funded_amnt)] <- df_estatisticas["funded_amnt", "min"]
+
+
+# Verificando Dados Ausentes e Summary
+colSums(is.na(dados_limpos))
+summary(dados_limpos$funded_amnt)
+
+
+
+## Tratando colunas numéricas loan_amnt, int_rate, installment e total_pymnt  (substituindo todos os valores NA pelo valor médio)
 
