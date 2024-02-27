@@ -56,7 +56,8 @@ rm(limpar_colunas)
 
 ## Transformando Colunas Para Numérico (e assim diferenciar dasquelas que serão do tipo factor)
 
-colunas_para_converter <- c("id", "loan_amnt", "funded_amnt", "int_rate", "installment", "total_pymnt") # Lista das colunas para converter para numérico
+# Lista das colunas para converter para numérico
+colunas_para_converter <- c("id", "loan_amnt", "funded_amnt", "int_rate", "installment", "total_pymnt") 
 
 # Loop pelas colunas especificadas e converter para numérico
 for (coluna in colunas_para_converter) {
@@ -70,7 +71,7 @@ rm(colunas_para_converter, coluna)
 #### Tratando Colunas do tipo String ('issue_d' 'loan_status' 'term' 'grade' 'sub_grade' 'verification_status' 'url' 'addr_state')
 
 
-### Pré-Processamento da Variável issue_date com Label Encoding (não foi tratado valor ausente)
+### Pré-Processamento da Variável issue_date com Label Encoding (valor ausente tratado - todo valor ausente considerado como 0)
 
 # Modificando nome
 # which(names(dados_limpos) == "issue_d")
@@ -90,7 +91,7 @@ dados_limpos$issue_date <- sapply(dados_limpos$issue_date, function(x) {
   if (!is.na(x) && x %in% names(meses_para_numeros)) {
     meses_para_numeros[x]
   } else {
-    NA  # Atribuir NA se não for um mês válido ou se for NA originalmente
+    0  # Atribuir 0 se não for um mês válido ou se for NA originalmente
   }
 })
 
@@ -147,7 +148,7 @@ table(dados_limpos$term_months, useNA = "ifany")
 
 
 
-### Pré-Processamento das Variáveis grade e sub_grade com Dicionário (variaveis ausentes tratadas)
+### Pré-Processamento das Variáveis grade e sub_grade trasnformando em tipo factor (variaveis ausentes tratadas)
 
 # Verificando valores únicos
 unique(dados_limpos$grade)
@@ -280,13 +281,12 @@ summary(dados_limpos)
 ## Verificando Dados Ausentes
 colSums(is.na(dados_limpos))
 
-# variáveis com valores ausentes -> issue_date, loan_amnt, funded_amnt, int_rate, installment e total_pymnt
+# variáveis com valores ausentes ->  loan_amnt, funded_amnt, int_rate, installment e total_pymnt
 
 
 
 
 #### Tratando Colunas do tipo Numérica     ("sapply(dados_limpos, is.numeric)" -> colunas numéricas)
-
 
 ## Este trecho do código seria somente para ficar igual ao projeto original do Python (não necessário em Python)
 
@@ -314,7 +314,7 @@ estatisticas <- sapply(dados_limpos[, sapply(dados_limpos, is.numeric)], functio
 df_estatisticas <- as.data.frame(t(estatisticas))
 df_estatisticas
 rm(estatisticas)
-summary(dados_limpos$funded_amnt)
+summary(dados_limpos)
 
 
 
@@ -322,7 +322,6 @@ summary(dados_limpos$funded_amnt)
 
 # Substituindo valores NA por valor mínimo na coluna funded_amnt
 dados_limpos$funded_amnt[is.na(dados_limpos$funded_amnt)] <- df_estatisticas["funded_amnt", "min"]
-
 
 # Verificando Dados Ausentes e Summary
 colSums(is.na(dados_limpos))
@@ -332,3 +331,84 @@ summary(dados_limpos$funded_amnt)
 
 ## Tratando colunas numéricas loan_amnt, int_rate, installment e total_pymnt  (substituindo todos os valores NA pelo valor médio)
 
+# Substituindo valores NA pelo valor médio das colunas especificadas
+for(coluna in c("loan_amnt", "int_rate", "installment", "total_pymnt")) {
+  # Extraímos o valor médio como um número
+  valor_medio <- as.numeric(df_estatisticas[coluna, "mean"])
+  
+  # Usamos o valor médio para substituir NA's
+  dados_limpos[[coluna]][is.na(dados_limpos[[coluna]])] <- valor_medio
+}
+rm(valor_medio, coluna)
+
+# Verificando Dados Ausentes e Summary
+colSums(is.na(dados_limpos))
+summary(dados_limpos)
+
+
+
+#### Carregando o segundo dataset
+
+# Este dataset contém a taxa de câmbio de dólar para euro. Cada coluna representa uma taxa de cambio de abertura (Open) a fechamento (Close)
+# Vamos usar a coluna Close
+
+# Iremos pegar estes dados, casar com os dados que estão em dólar, fazer os ajustes e preparar novas colunas.
+
+## Carregando dados
+dados_cot <- read.csv2("datasets/dataset2.csv", sep = ",", dec = ".")
+dados_cot
+head(dados_limpos)
+
+## Adicionando Coluna Mes
+dados_cot$Mes <- 1:12
+dados_cot$Mes <- as.factor(dados_cot$Mes)
+
+
+## Verificando Dados Ausentes e Sumário
+colSums(is.na(dados_cot))
+str(dados_cot)
+dim(dados_cot)
+
+
+## Combinando os dois datasets
+
+# Adicionando Uma Nova Coluna Taxa_Cambio a dados_limpos
+
+dados_limpos$taxa_cambio <- NA     # Inicializa a coluna com NA
+
+# Agora, percorra cada linha de dados_limpos$issue_date para preencher taxa_cambio
+
+for (i in 1:nrow(dados_limpos)) {
+  # Encontre o índice em dados_cot que corresponde ao Mes em dados_limpos$issue_date
+  mes_correspondente <- as.numeric(levels(dados_cot$Mes)[dados_cot$Mes]) == (dados_limpos$issue_date[i])
+  
+  # Se existe um mês correspondente, atualize taxa_cambio com o valor Close de dados_cot
+  if (any(mes_correspondente)) {
+    dados_limpos$taxa_cambio[i] <- dados_cot$Close[mes_correspondente]
+  } else {
+    # Caso contrário, deixe taxa_cambio como NA (já está definido por padrão)
+    next # Opcional, apenas para clareza. NA já é o valor padrão.
+  }
+}
+
+# Substitui os valores NA em dados_limpos$taxa_cambio pelo valor médio calculado
+dados_limpos$taxa_cambio[is.na(dados_limpos$taxa_cambio)] <- mean(dados_cot$Close, na.rm = TRUE)
+
+## Verificando Dados Ausentes e Sumário
+colSums(is.na(dados_limpos))
+summary(dados_limpos$issue_date)
+summary(dados_limpos$taxa_cambio)
+
+
+
+# - Preciso criar 4 novas colunas chamado 'loan_amnt_EUR', 'funded_amnt_EUR', 'installment_EUR', 'total_pymnt_EUR' em dados_limpos
+
+# - Adicionar o valor correto para cada nova variável de acordo com a conversão para EURO
+#   (ou seja, coluna loan_amnt_EUR deve ter como valor o valor de loan_amtn original convertido para EURO usando dados_novos$taxa_cambio)
+#   (ou seja, coluna funded_amnt_EUR deve ter como valor o valor de funded_amnt original convertido para EURO usando dados_novos$taxa_cambio)
+#   (ou seja, coluna installment_EUR deve ter como valor o valor de installment original convertido para EURO usando dados_novos$taxa_cambio)
+#   (ou seja, coluna total_pymnt_EUR deve ter como valor o valor de total_pymnt original convertido para EURO usando dados_novos$taxa_cambio)
+
+# - Após colocar o valor reorganizar o dataframe para a seguinte oderm:
+
+# - Modificar a coluna int_rate (convertendo valor por 100)
