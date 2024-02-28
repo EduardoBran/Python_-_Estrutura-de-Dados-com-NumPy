@@ -11,7 +11,17 @@ getwd()
 
 ## Importando Pacotes
 library(readxl)         # carregar arquivos
-library(dplyr)
+library(dplyr)          # manipula arquivos
+
+
+library(ROSE)           # balanceamento
+
+library(randomForest)   # carrega algoritimo de ML (randomForest)
+library(caret)          # cria confusion matrix
+library(corrplot)       # análise de correlação
+
+library(h2o)
+
 
 
 #### Carregando dados
@@ -420,7 +430,7 @@ dados_limpos$taxa_cambio <- NULL
 dados_limpos <- dados_limpos[, c('id', 'loan_amnt_USD', 'loan_amnt_EUR', 'funded_amnt_USD', 'funded_amnt_EUR', 
                                  'int_rate', 'installment_USD', 'installment_EUR', 'total_pymnt_USD', 
                                  'total_pymnt_EUR', 'issue_date', 'loan_status', 'term_months', 
-                                 'sub_grade', 'verification_status', 'state_address')]
+                                 'sub_grade', 'state_address', 'verification_status')]
 
 # Pré-Processamento da Variável int_rate (convertendo valor por 100)
 dados_limpos$int_rate <- dados_limpos$int_rate / 100
@@ -436,3 +446,470 @@ View(dados_limpos)
 
 
 
+
+
+#######################         Aplicando Machine Learning          #######################
+
+# - Definição do Problema: Desenvolver um modelo de classificação que possa prever a necessidade de verificação de um empréstimo (verification_status)
+#   com base em características financeiras e pessoais do solicitante.
+
+# - Variável Alvo (Target): verification_status, onde o modelo deve ser capaz de classificar os empréstimos em categorias que requerem verificação
+#   e as que não requerem.
+
+
+## Carregando dados limpos
+dados <- data.frame(read.csv2("datasets/dados_limpos.csv", sep = ",", dec = "."))
+
+
+## Modificando variáveis para tipo factor
+dados[c("issue_date", "loan_status", "term_months", "sub_grade", "state_address", "verification_status")] <-
+  lapply(dados[c("issue_date", "loan_status", "term_months", "sub_grade", "state_address", "verification_status")], as.factor)
+
+
+## Verificando Tipo de Dados
+str(dados)
+summary(dados)
+summary(dados$issue_date)
+
+
+## Preparando Dataset (remoção de colunas e tratando coluna issue_date)
+
+# Removendo Colunas
+dados <- dados %>% 
+  select(-loan_amnt_EUR, -funded_amnt_EUR, -installment_EUR, -total_pymnt_EUR)
+
+# Tratando issue_date
+dados <- dados[dados$issue_date != "0", ]
+dados$issue_date <- factor(dados$issue_date)
+
+
+## Salvando Dataset para Modelo
+
+
+
+## Criando Lista Para Armazenar Resultados dos Modelos das Versões
+resultados_modelos <- list()
+
+
+
+### Versão 1
+
+# - Usando dados originais 
+
+# Carregando dados modelo
+dados <- data.frame(read.csv2("datasets/dados_modelo.csv", sep = ",", dec = "."))
+dados$verification_status <- as.factor(dados$verification_status)
+
+
+## Criando Modelo
+
+# Dividindo os dados em treino e teste
+set.seed(100)
+indices <- createDataPartition(dados$verification_status, p = 0.9, list = FALSE)
+dados_treino <- dados[indices, ]
+dados_teste <- dados[-indices, ]
+rm(indices)
+
+# RandomForest
+modelo_rf <- randomForest(verification_status ~ ., 
+                          data = dados_treino, 
+                          ntree = 100, nodesize = 10)
+
+
+## Avaliando e Visualizando Desempenho do Modelo
+previsoes <- predict(modelo_rf, newdata = dados_teste)
+conf_mat <- confusionMatrix(previsoes, dados_teste$verification_status)
+
+resultados_modelos[['Versao1_rf']] <- list(
+  Accuracy = round(conf_mat$overall['Accuracy'], 4),
+  Sensitivity = round(conf_mat$byClass['Sensitivity'], 4),
+  Specificity = round(conf_mat$byClass['Specificity'], 4),
+  Balanced_Accuracy = round(conf_mat$byClass['Balanced Accuracy'], 4)
+)
+# resultados_modelos  # Acc 0.706
+
+rm(dados, dados_teste, dados_treino, modelo_rf, previsoes, conf_mat)
+
+
+
+
+### Versão 2
+
+# - Modificando variáveis para factor
+# - Utiliza Feature Selection
+
+
+# Carregando dados modelo
+dados <- data.frame(read.csv2("datasets/dados_modelo.csv", sep = ",", dec = "."))
+
+# Modificando variáveis para tipo factor
+dados[c("issue_date", "loan_status", "term_months", "sub_grade", "state_address", "verification_status")] <-
+  lapply(dados[c("issue_date", "loan_status", "term_months", "sub_grade", "state_address", "verification_status")], as.factor)
+
+str(dados)
+
+
+## Feature Selection
+modelo <- randomForest(verification_status ~ ., 
+                       data = dados, 
+                       ntree = 100, nodesize = 10, importance = T)
+
+# Visualizando por números
+print(modelo$importance)
+
+# Visualizando por Gráficos
+varImpPlot(modelo)
+
+importancia_ordenada <- modelo$importance[order(-modelo$importance[, 1]), , drop = FALSE] 
+df_importancia <- data.frame(
+  Variavel = rownames(importancia_ordenada),
+  Importancia = importancia_ordenada[, 1]
+)
+ggplot(df_importancia, aes(x = reorder(Variavel, -Importancia), y = Importancia)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "Importância das Variáveis", x = "Variável", y = "Importância") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 10))
+
+rm(modelo, importancia_ordenada, df_importancia)
+
+
+## Criando Modelo
+
+# Dividindo os dados em treino e teste
+set.seed(100)
+indices <- createDataPartition(dados$verification_status, p = 0.9, list = FALSE)
+dados_treino <- dados[indices, ]
+dados_teste <- dados[-indices, ]
+rm(indices)
+
+# RandomForest
+modelo_rf <- randomForest(verification_status ~ sub_grade + loan_amnt_USD + installment_USD + funded_amnt_USD + issue_date + int_rate, 
+                          data = dados_treino, 
+                          ntree = 100, nodesize = 10)
+
+## Avaliando e Visualizando Desempenho do Modelo
+previsoes <- predict(modelo_rf, newdata = dados_teste)
+conf_mat <- confusionMatrix(previsoes, dados_teste$verification_status)
+conf_mat
+
+resultados_modelos[['Versao2_rf']] <- list(
+  Accuracy = round(conf_mat$overall['Accuracy'], 4),
+  Sensitivity = round(conf_mat$byClass['Sensitivity'], 4),
+  Specificity = round(conf_mat$byClass['Specificity'], 4),
+  Balanced_Accuracy = round(conf_mat$byClass['Balanced Accuracy'], 4)
+)
+# resultados_modelos  # Acc 0.7134
+
+rm(dados, dados_teste, dados_treino, modelo_rf, previsoes, conf_mat)
+
+
+
+### Versão 3
+
+# - Modificando variáveis para factor
+# - Aplica Normalização
+# - Utiliza Feature Selection
+
+# Carregando dados modelo
+dados <- data.frame(read.csv2("datasets/dados_modelo.csv", sep = ",", dec = "."))
+
+# Modificando variáveis para tipo factor
+dados[c("issue_date", "loan_status", "term_months", "sub_grade", "state_address", "verification_status")] <-
+  lapply(dados[c("issue_date", "loan_status", "term_months", "sub_grade", "state_address", "verification_status")], as.factor)
+
+str(dados)
+
+# Aplicando Normalização nas Variáveis Numéricas
+numeric_columns <- sapply(dados, is.numeric)
+dados_nor <- dados %>%
+  mutate(across(where(is.numeric), ~ scale(., center = min(.), scale = max(.) - min(.))))
+rm(numeric_columns)
+
+# Reverter Normalização
+# dados_revertidos <- dados_nor %>%
+#   mutate(across(where(is.numeric), ~ (. * (max(dados[, cur_column()]) - min(dados[, cur_column()])) + min(dados[, cur_column()]))))
+
+
+
+## Criando Modelo
+
+# Dividindo os dados em treino e teste
+set.seed(100)
+indices <- createDataPartition(dados_nor$verification_status, p = 0.9, list = FALSE)
+dados_treino <- dados_nor[indices, ]
+dados_teste <- dados_nor[-indices, ]
+rm(indices)
+
+# RandomForest
+modelo_rf <- randomForest(verification_status ~ sub_grade + loan_amnt_USD + installment_USD + funded_amnt_USD + issue_date + int_rate, 
+                          data = dados_treino, 
+                          ntree = 100, nodesize = 10)
+
+## Avaliando e Visualizando Desempenho do Modelo
+previsoes <- predict(modelo_rf, newdata = dados_teste)
+conf_mat <- confusionMatrix(previsoes, dados_teste$verification_status)
+conf_mat
+
+resultados_modelos[['Versao3_rf']] <- list(
+  Accuracy = round(conf_mat$overall['Accuracy'], 4),
+  Sensitivity = round(conf_mat$byClass['Sensitivity'], 4),
+  Specificity = round(conf_mat$byClass['Specificity'], 4),
+  Balanced_Accuracy = round(conf_mat$byClass['Balanced Accuracy'], 4)
+)
+# resultados_modelos  # Acc 0.705
+
+rm(dados, dados_teste, dados_treino, modelo_rf, previsoes, conf_mat)
+
+
+
+
+### Versão 4
+
+# - Modificando variáveis para factor
+# - Balanceamento Variável Target
+# - Utiliza Feature Selection
+
+
+# Carregando dados modelo
+dados <- data.frame(read.csv2("datasets/dados_modelo.csv", sep = ",", dec = "."))
+
+# Modificando variáveis para tipo factor
+dados[c("issue_date", "loan_status", "term_months", "sub_grade", "state_address", "verification_status")] <-
+  lapply(dados[c("issue_date", "loan_status", "term_months", "sub_grade", "state_address", "verification_status")], as.factor)
+
+str(dados)
+summary(dados$verification_status)
+
+# Balanceando Variável Alvo
+dados_balanceados <- ovun.sample(verification_status ~ ., data = dados, method = "over", N = 2*max(table(dados$verification_status)))$data
+summary(dados_balanceados$verification_status)
+
+
+
+## Criando Modelo
+
+# Dividindo os dados em treino e teste
+set.seed(100)
+indices <- createDataPartition(dados_balanceados$verification_status, p = 0.9, list = FALSE)
+dados_treino <- dados_balanceados[indices, ]
+dados_teste <- dados_balanceados[-indices, ]
+rm(indices)
+
+# RandomForest
+modelo_rf <- randomForest(verification_status ~ sub_grade + loan_amnt_USD + installment_USD + funded_amnt_USD + issue_date + int_rate, 
+                          data = dados_treino, 
+                          ntree = 100, nodesize = 10)
+
+## Avaliando e Visualizando Desempenho do Modelo
+previsoes <- predict(modelo_rf, newdata = dados_teste)
+conf_mat <- confusionMatrix(previsoes, dados_teste$verification_status)
+conf_mat
+
+resultados_modelos[['Versao4_rf']] <- list(
+  Accuracy = round(conf_mat$overall['Accuracy'], 4),
+  Sensitivity = round(conf_mat$byClass['Sensitivity'], 4),
+  Specificity = round(conf_mat$byClass['Specificity'], 4),
+  Balanced_Accuracy = round(conf_mat$byClass['Balanced Accuracy'], 4)
+)
+# resultados_modelos  # Acc Accuracy : 0.781
+
+rm(dados, dados_balanceados, dados_teste, dados_treino, modelo_rf, previsoes, conf_mat)
+
+
+
+
+### Versão 5
+
+# - Modificando variáveis para factor
+# - Balanceamento Variável Target
+# - Normalizando Algumas Variáveis
+# - Utiliza Feature Selection
+
+
+# Carregando dados modelo
+dados <- data.frame(read.csv2("datasets/dados_modelo.csv", sep = ",", dec = "."))
+
+# Modificando variáveis para tipo factor
+dados[c("issue_date", "loan_status", "term_months", "sub_grade", "state_address", "verification_status")] <-
+  lapply(dados[c("issue_date", "loan_status", "term_months", "sub_grade", "state_address", "verification_status")], as.factor)
+
+str(dados)
+summary(dados$verification_status)
+
+# Balanceando Variável Alvo
+dados_balanceados <- ovun.sample(verification_status ~ ., data = dados, method = "over", N = 2*max(table(dados$verification_status)))$data
+summary(dados_balanceados$verification_status)
+str(dados_balanceados)
+
+# Aplicando Normalização nas Variáveis Numéricas exceto int_rate
+dados_nor <- dados_balanceados %>%
+  mutate(across(all_of(setdiff(names(dados_balanceados)[sapply(dados_balanceados, is.numeric)], "int_rate")),
+                ~ scale(., center = min(.), scale = max(.) - min(.))))
+
+
+# Dividindo os dados em treino e teste
+set.seed(100)
+indices <- createDataPartition(dados_nor$verification_status, p = 0.9, list = FALSE)
+dados_treino <- dados_nor[indices, ]
+dados_teste <- dados_nor[-indices, ]
+rm(indices)
+
+# RandomForest
+modelo_rf <- randomForest(verification_status ~ sub_grade + loan_amnt_USD + installment_USD + funded_amnt_USD + issue_date + int_rate, 
+                          data = dados_treino, 
+                          ntree = 100, nodesize = 10)
+
+## Avaliando e Visualizando Desempenho do Modelo
+previsoes <- predict(modelo_rf, newdata = dados_teste)
+conf_mat <- confusionMatrix(previsoes, dados_teste$verification_status)
+conf_mat
+
+resultados_modelos[['Versao5_rf']] <- list(
+  Accuracy = round(conf_mat$overall['Accuracy'], 4),
+  Sensitivity = round(conf_mat$byClass['Sensitivity'], 4),
+  Specificity = round(conf_mat$byClass['Specificity'], 4),
+  Balanced_Accuracy = round(conf_mat$byClass['Balanced Accuracy'], 4)
+)
+# resultados_modelos  # Acc Accuracy : 0.7639
+
+rm(dados, dados_balanceados, dados_teste, dados_treino, modelo_rf, previsoes, conf_mat)
+
+
+
+
+### Versão 6
+
+# - Modificando variáveis para factor
+# - Balanceamento Variável Target
+# - Aplicando PCA para Redução de Dimensionalidade
+# - Utiliza Feature Selection
+
+
+# Carregando dados modelo
+dados <- data.frame(read.csv2("datasets/dados_modelo.csv", sep = ",", dec = "."))
+
+# Modificando variáveis para tipo factor
+dados[c("issue_date", "loan_status", "term_months", "sub_grade", "state_address", "verification_status")] <-
+  lapply(dados[c("issue_date", "loan_status", "term_months", "sub_grade", "state_address", "verification_status")], as.factor)
+
+str(dados)
+summary(dados$verification_status)
+
+# Balanceando Variável Alvo
+dados_balanceados <- ovun.sample(verification_status ~ ., data = dados, method = "over", N = 2*max(table(dados$verification_status)))$data
+summary(dados_balanceados$verification_status)
+str(dados_balanceados)
+
+# Aplicando PCA para Redução de Dimensionalidade
+preProcess_pca <- preProcess(dados_balanceados[, -ncol(dados_balanceados)], method = "pca", thresh = 0.95)
+dados_pca <- predict(preProcess_pca, dados[, -ncol(dados_balanceados)])
+
+# Adicionando a variável alvo
+dados_pca$verification_status <- dados$verification_status
+
+# Dividindo os dados em treino e teste
+set.seed(100)
+indices <- createDataPartition(dados_pca$verification_status, p = 0.9, list = FALSE)
+dados_treino <- dados_pca[indices, ]
+dados_teste <- dados_pca[-indices, ]
+rm(indices)
+
+# RandomForest
+modelo_rf <- randomForest(verification_status ~ ., 
+                          data = dados_treino, 
+                          ntree = 100, nodesize = 10)
+
+## Avaliando e Visualizando Desempenho do Modelo
+previsoes <- predict(modelo_rf, newdata = dados_teste)
+conf_mat <- confusionMatrix(previsoes, dados_teste$verification_status)
+conf_mat
+
+resultados_modelos[['Versao6_rf']] <- list(
+  Accuracy = round(conf_mat$overall['Accuracy'], 4),
+  Sensitivity = round(conf_mat$byClass['Sensitivity'], 4),
+  Specificity = round(conf_mat$byClass['Specificity'], 4),
+  Balanced_Accuracy = round(conf_mat$byClass['Balanced Accuracy'], 4)
+)
+# resultados_modelos  # Acc Accuracy : 0.7197
+
+rm(dados, dados_balanceados, dados_teste, dados_treino, modelo_rf, previsoes, conf_mat, preProcess_pca)
+
+
+
+### Versão 7 (AutoML)
+
+# - Modificando variáveis para factor
+# - Utiliza AutoML
+
+# Carregando dados modelo
+dados <- data.frame(read.csv2("datasets/dados_modelo.csv", sep = ",", dec = "."))
+
+# Modificando variáveis para tipo factor
+dados[c("issue_date", "loan_status", "term_months", "sub_grade", "state_address", "verification_status")] <-
+  lapply(dados[c("issue_date", "loan_status", "term_months", "sub_grade", "state_address", "verification_status")], as.factor)
+
+str(dados)
+
+dados <- dados %>% 
+  select(-id)
+
+
+## Automl
+
+# Inicializando o H2O (Framework de Machine Learning)
+h2o.init()
+
+# O H2O requer que os dados estejam no formato de dataframe do H2O
+h2o_frame <- as.h2o(dados)
+class(h2o_frame)
+
+# Split dos dados em treino e teste (cria duas listas)
+h2o_frame_split <- h2o.splitFrame(h2o_frame, ratios = 0.90)
+head(h2o_frame_split)
+h2o_frame_split
+
+
+modelo_automl <- h2o.automl(y = 'verification_status',                         # Nome da variável alvo atualizado para 'STATUS'
+                            training_frame = h2o_frame_split[[1]],             # Conjunto de dados de treinamento
+                            leaderboard_frame = h2o_frame_split[[2]],          # Conjunto de dados para a leaderboard
+                            max_runtime_secs = 60 * 10,
+                            sort_metric = "AUC")                               # Mudança da métrica de avaliação para AUC, adequada para classificação
+
+
+# Extrai o leaderboard (dataframe com os modelos criados)
+leaderboard_automl <- as.data.frame(modelo_automl@leaderboard)
+head(leaderboard_automl, 3)
+View(leaderboard_automl)
+
+
+# Extrai os líderes (modelo com melhor performance)
+lider_automl <- modelo_automl@leader
+print(lider_automl)
+
+# # Avaliação dos Modelos
+h2o.performance(lider_automl, newdata = h2o_frame_split[[2]])  # AUC:  0.7328346
+
+
+resultados_modelos[['Versao7_automl']] <- list(
+  Accuracy = round(0.7328346, 4),
+  Sensitivity = 0,
+  Specificity = 0,
+  Balanced_Accuracy = 0
+)
+# resultados_modelos  # Acc Accuracy : 0.781
+
+
+resultados_modelos
+
+
+
+
+
+
+
+## Adicionando Resultados das Versões em um DataFrame
+modelos_params <- do.call(rbind, lapply(resultados_modelos, function(x) data.frame(t(unlist(x))))) # Convertendo a lista de resultados em um dataframe
+modelos_params
+modelos_params <- 
+  data.frame(Version = names(resultados_modelos), do.call(rbind, lapply(resultados_modelos, function(x) unlist(x))), row.names = NULL)
+View(modelos_params)
