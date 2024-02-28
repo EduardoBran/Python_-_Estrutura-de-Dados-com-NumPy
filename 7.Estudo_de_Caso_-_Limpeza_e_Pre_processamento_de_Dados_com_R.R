@@ -390,6 +390,7 @@ for (i in 1:nrow(dados_limpos)) {
     next # Opcional, apenas para clareza. NA já é o valor padrão.
   }
 }
+rm(i, mes_correspondente, taxas_cambio)
 
 # Substitui os valores NA em dados_limpos$taxa_cambio pelo valor médio calculado
 dados_limpos$taxa_cambio[is.na(dados_limpos$taxa_cambio)] <- mean(dados_cot$Close, na.rm = TRUE)
@@ -400,15 +401,38 @@ summary(dados_limpos$issue_date)
 summary(dados_limpos$taxa_cambio)
 
 
+# Adicionando 4 novas colunas chamado 'loan_amnt_EUR', 'funded_amnt_EUR', 'installment_EUR', 'total_pymnt_EUR'
+dados_limpos$loan_amnt_EUR <- dados_limpos$loan_amnt / dados_limpos$taxa_cambio
+dados_limpos$funded_amnt_EUR <- dados_limpos$funded_amnt / dados_limpos$taxa_cambio
+dados_limpos$installment_EUR <- dados_limpos$installment / dados_limpos$taxa_cambio
+dados_limpos$total_pymnt_EUR <- dados_limpos$total_pymnt / dados_limpos$taxa_cambio
 
-# - Preciso criar 4 novas colunas chamado 'loan_amnt_EUR', 'funded_amnt_EUR', 'installment_EUR', 'total_pymnt_EUR' em dados_limpos
+# Modificando o nome das colunas
+names(dados_limpos)[names(dados_limpos) == "loan_amnt"] <- "loan_amnt_USD"
+names(dados_limpos)[names(dados_limpos) == "funded_amnt"] <- "funded_amnt_USD"
+names(dados_limpos)[names(dados_limpos) == "installment"] <- "installment_USD"
+names(dados_limpos)[names(dados_limpos) == "total_pymnt"] <- "total_pymnt_USD"
 
-# - Adicionar o valor correto para cada nova variável de acordo com a conversão para EURO
-#   (ou seja, coluna loan_amnt_EUR deve ter como valor o valor de loan_amtn original convertido para EURO usando dados_novos$taxa_cambio)
-#   (ou seja, coluna funded_amnt_EUR deve ter como valor o valor de funded_amnt original convertido para EURO usando dados_novos$taxa_cambio)
-#   (ou seja, coluna installment_EUR deve ter como valor o valor de installment original convertido para EURO usando dados_novos$taxa_cambio)
-#   (ou seja, coluna total_pymnt_EUR deve ter como valor o valor de total_pymnt original convertido para EURO usando dados_novos$taxa_cambio)
+# Removendo a coluna taxa_cambio
+dados_limpos$taxa_cambio <- NULL
 
-# - Após colocar o valor reorganizar o dataframe para a seguinte oderm:
+# Reordenando o dataframe
+dados_limpos <- dados_limpos[, c('id', 'loan_amnt_USD', 'loan_amnt_EUR', 'funded_amnt_USD', 'funded_amnt_EUR', 
+                                 'int_rate', 'installment_USD', 'installment_EUR', 'total_pymnt_USD', 
+                                 'total_pymnt_EUR', 'issue_date', 'loan_status', 'term_months', 
+                                 'sub_grade', 'verification_status', 'state_address')]
 
-# - Modificar a coluna int_rate (convertendo valor por 100)
+# Pré-Processamento da Variável int_rate (convertendo valor por 100)
+dados_limpos$int_rate <- dados_limpos$int_rate / 100
+
+
+View(dados_limpos)
+
+
+
+## Salvando dataset
+# write.csv(dados_limpos, "datasets/dados_limpos.csv", row.names = FALSE)
+
+
+
+
